@@ -62,7 +62,7 @@ It is **inspection-only**. It does not upload files, sign IPAs, share certificat
 | 🔐 `.p12` inspection | Password validation, CN, Team ID, serials, dates, SHA fingerprints |
 | 📄 `.mobileprovision` inspection | Profile metadata, devices, entitlements, embedded certificates |
 | 🧪 Compatibility checks | Team ID match, expiration, developer certificate fingerprint match |
-| 🛰️ Revocation checks | Optional OCSP status checks with `--ocsp` |
+| 🛰️ Revocation checks | Optional OCSP status checks with built-in Apple WWDR issuers |
 | 🧾 JSON mode | Script-friendly output with `--json` |
 | 🔒 Privacy-first | No uploads, no telemetry, no analytics; network is used only when `--ocsp` is requested |
 
@@ -340,6 +340,8 @@ ios-cert-checker cert --p12 cert.p12 --password "password" --ocsp
 ios-cert-checker check --p12 cert.p12 --provision profile.mobileprovision --password "password" --ocsp
 ```
 
+The app includes Apple WWDR intermediate issuer certificates G2 through G6, including G3 for Apple/iOS Development and Distribution certificates. For normal Apple signing certificates, you do not need to add an issuer certificate manually.
+
 OCSP checks use OpenSSL and contact the OCSP responder URL advertised by the certificate. This is the only feature that intentionally makes a network request. The tool writes only temporary public certificate files in the OS temp directory for the OpenSSL OCSP command and deletes them immediately.
 
 ### `.mobileprovision`
@@ -362,7 +364,7 @@ openssl cms -inform DER -verify -noverify -in profile.mobileprovision
 
 ## ⚠️ Limitations
 
-- OCSP checks require the `.p12` to include the issuer certificate. If the issuer certificate is missing, the result is reported as `skipped`.
+- OCSP checks require an issuer certificate. Apple WWDR G2-G6 issuers are bundled; non-Apple certificates still need their issuer in the `.p12`.
 - CRL checks are not implemented.
 - XML plist payloads are supported.
 - Binary plist payloads return a clear unsupported-format error.

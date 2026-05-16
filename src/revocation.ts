@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { APPLE_ISSUER_PEMS } from "./appleIssuers.js";
 import type { ParsedCertificate, RevocationInfo, RevocationStatus } from "./types.js";
 
 const DEFAULT_OCSP_TIMEOUT_SECONDS = 10;
@@ -20,12 +21,14 @@ export function checkOcspRevocation(
     revocationTime: null,
   };
 
-  if (!cert.issuerPem) {
+  const issuerPem = cert.issuerPem ?? findBundledAppleIssuerPem(cert.pem);
+  if (!issuerPem) {
     return {
       ...base,
       checked: false,
       status: "skipped",
-      reason: "OCSP requires the issuer certificate, but it was not present in the PKCS#12 file.",
+      reason:
+        "OCSP requires the issuer certificate, but no issuer was found in the PKCS#12 file or bundled Apple WWDR issuers.",
     };
   }
 
@@ -48,7 +51,7 @@ export function checkOcspRevocation(
     };
   }
 
-  return runOpenSslOcsp(cert, ocspUrlResult.url, timeoutSeconds, checkedAt);
+  return runOpenSslOcsp(cert, issuerPem, ocspUrlResult.url, timeoutSeconds, checkedAt);
 }
 
 function readOcspUrl(certPem: string): { url: string | null; error: string | null } {
@@ -74,6 +77,7 @@ function readOcspUrl(certPem: string): { url: string | null; error: string | nul
 
 function runOpenSslOcsp(
   cert: ParsedCertificate,
+  issuerPem: string,
   ocspUrl: string,
   timeoutSeconds: number,
   checkedAt: string,
@@ -84,7 +88,7 @@ function runOpenSslOcsp(
 
   try {
     writeFileSync(certPath, cert.pem, { mode: 0o600 });
-    writeFileSync(issuerPath, cert.issuerPem!, { mode: 0o600 });
+    writeFileSync(issuerPath, issuerPem, { mode: 0o600 });
 
     let result = runOcspCommand(certPath, issuerPath, ocspUrl, timeoutSeconds, true);
     if (result.status !== 0 && /unknown option|invalid option|timeout/i.test(result.stderr)) {
@@ -122,6 +126,32 @@ function runOpenSslOcsp(
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+function findBundledAppleIssuerPem(certPem: string): string | null {
+  const issuerName = readCertificateName(certPem, "issuer");
+  if (!issuerName) {
+    return null;
+  }
+
+  return (
+    APPLE_ISSUER_PEMS.find((issuerPem) => readCertificateName(issuerPem, "subject") === issuerName) ??
+    null
+  );
+}
+
+function readCertificateName(pem: string, field: "issuer" | "subject"): string | null {
+  const result = spawnSync("openssl", ["x509", "-noout", `-${field}`, "-nameopt", "RFC2253"], {
+    encoding: "utf8",
+    input: pem,
+    maxBuffer: 1024 * 1024,
+  });
+
+  if (result.status !== 0 || result.error) {
+    return null;
+  }
+
+  return result.stdout.trim().replace(new RegExp(`^${field}=`), "");
 }
 
 function runOcspCommand(
