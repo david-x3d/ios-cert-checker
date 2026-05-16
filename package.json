@@ -4,7 +4,7 @@
   "description": "Privacy-first local CLI for inspecting iOS signing certificates and provisioning profiles.",
   "type": "module",
   "bin": {
-    "ios-cert-checker": "./dist/index.js"
+    "ios-cert-checker": "dist/index.js"
   },
   "files": [
     "dist",

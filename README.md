@@ -62,8 +62,9 @@ It is **inspection-only**. It does not upload files, sign IPAs, share certificat
 | 🔐 `.p12` inspection | Password validation, CN, Team ID, serials, dates, SHA fingerprints |
 | 📄 `.mobileprovision` inspection | Profile metadata, devices, entitlements, embedded certificates |
 | 🧪 Compatibility checks | Team ID match, expiration, developer certificate fingerprint match |
+| 🛰️ Revocation checks | Optional OCSP status checks with `--ocsp` |
 | 🧾 JSON mode | Script-friendly output with `--json` |
-| 🔒 Privacy-first | No uploads, no telemetry, no analytics, no network calls from the CLI |
+| 🔒 Privacy-first | No uploads, no telemetry, no analytics; network is used only when `--ocsp` is requested |
 
 ---
 
@@ -145,12 +146,31 @@ ios-cert-checker check \
   --password "password"
 ```
 
+Add OCSP revocation checking:
+
+```bash
+ios-cert-checker check \
+  --p12 cert.p12 \
+  --provision profile.mobileprovision \
+  --password "password" \
+  --ocsp
+```
+
 ### Inspect Certificate Only
 
 ```bash
 ios-cert-checker cert \
   --p12 cert.p12 \
   --password "password"
+```
+
+With OCSP:
+
+```bash
+ios-cert-checker cert \
+  --p12 cert.p12 \
+  --password "password" \
+  --ocsp
 ```
 
 ### Inspect Provisioning Profile Only
@@ -195,7 +215,18 @@ ios-cert-checker check \
     "sha1Fingerprint": "AA:BB:CC:DD:...",
     "sha256Fingerprint": "11:22:33:44:...",
     "isCurrentlyValid": true,
-    "daysUntilExpiration": 270
+    "daysUntilExpiration": 270,
+    "revocation": {
+      "method": "OCSP",
+      "checked": true,
+      "status": "good",
+      "ocspUrl": "http://ocsp.example.com",
+      "checkedAt": "2026-05-16T01:12:00.000Z",
+      "thisUpdate": "2026-05-16T00:00:00.000Z",
+      "nextUpdate": "2026-05-23T00:00:00.000Z",
+      "revocationTime": null,
+      "reason": null
+    }
   },
   "provisioningProfile": {
     "name": "Example Profile",
@@ -243,6 +274,7 @@ ios-cert-checker check \
 - SHA-1 fingerprint
 - SHA-256 fingerprint
 - Current validity state
+- OCSP revocation status when `--ocsp` is used
 
 ### Provisioning Profile Fields
 
@@ -264,6 +296,7 @@ ios-cert-checker check \
 ### Validation Checks
 
 - Certificate is currently valid
+- Certificate revocation status is good, revoked, unknown, skipped, or errored when `--ocsp` is used
 - Provisioning profile is currently valid
 - Team IDs match
 - Profile contains developer certificates
@@ -274,7 +307,7 @@ ios-cert-checker check \
 ## 🔒 Privacy & Security
 
 - Files stay on your machine.
-- The CLI does not make network requests.
+- The CLI does not make network requests unless `--ocsp` is passed.
 - No telemetry, analytics, or tracking.
 - The `.p12` password is never printed.
 - Private key material is never logged.
@@ -298,6 +331,17 @@ openssl pkcs12 -nokeys
 
 The password is passed through an environment variable instead of being printed in terminal output.
 
+### OCSP Revocation
+
+Revocation checking is available with `--ocsp` on `cert` and `check`.
+
+```bash
+ios-cert-checker cert --p12 cert.p12 --password "password" --ocsp
+ios-cert-checker check --p12 cert.p12 --provision profile.mobileprovision --password "password" --ocsp
+```
+
+OCSP checks use OpenSSL and contact the OCSP responder URL advertised by the certificate. This is the only feature that intentionally makes a network request. The tool writes only temporary public certificate files in the OS temp directory for the OpenSSL OCSP command and deletes them immediately.
+
 ### `.mobileprovision`
 
 Provisioning profiles are CMS/PKCS#7 signed plist files.
@@ -318,7 +362,8 @@ openssl cms -inform DER -verify -noverify -in profile.mobileprovision
 
 ## ⚠️ Limitations
 
-- OCSP/revocation checking is skipped in this MVP.
+- OCSP checks require the `.p12` to include the issuer certificate. If the issuer certificate is missing, the result is reported as `skipped`.
+- CRL checks are not implemented.
 - XML plist payloads are supported.
 - Binary plist payloads return a clear unsupported-format error.
 - Team ID detection is best-effort.

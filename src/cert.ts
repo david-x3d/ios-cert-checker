@@ -54,9 +54,10 @@ function parseP12WithForge(p12Bytes: Buffer, password: string): ParsedCertificat
     throw new CertificateParseError("No certificate found in PKCS#12 file.");
   }
 
-  const cert = certBags
+  const certs = certBags
     .map((bag) => bag.cert)
-    .find((candidate): candidate is forge.pki.Certificate => Boolean(candidate));
+    .filter((candidate): candidate is forge.pki.Certificate => Boolean(candidate));
+  const cert = chooseLeafCertificate(certs);
 
   if (!cert) {
     throw new CertificateParseError("No readable X.509 certificate found in PKCS#12 file.");
@@ -66,7 +67,7 @@ function parseP12WithForge(p12Bytes: Buffer, password: string): ParsedCertificat
     forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(),
     "binary",
   );
-  return certificateFromForgeCert(cert, der);
+  return certificateFromForgeCert(cert, der, certs);
 }
 
 function parseP12WithOpenSsl(path: string, password: string): ParsedCertificate {
@@ -77,7 +78,6 @@ function parseP12WithOpenSsl(path: string, password: string): ParsedCertificate 
       "-in",
       path,
       "-nokeys",
-      "-clcerts",
       "-passin",
       "env:IOS_CERT_CHECKER_P12_PASSWORD",
     ],
@@ -111,28 +111,38 @@ function parseP12WithOpenSsl(path: string, password: string): ParsedCertificate 
     );
   }
 
-  const pemMatch = result.stdout.match(
-    /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/,
+  const pemMatches = result.stdout.match(
+    /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g,
   );
-  if (!pemMatch) {
+  if (!pemMatches || pemMatches.length === 0) {
     throw new CertificateParseError("OpenSSL did not return a certificate from the PKCS#12 file.");
   }
 
-  const cert = forge.pki.certificateFromPem(pemMatch[0]);
+  const certs = pemMatches.map((pem) => forge.pki.certificateFromPem(pem));
+  const cert = chooseLeafCertificate(certs);
+  if (!cert) {
+    throw new CertificateParseError("OpenSSL did not return a readable leaf certificate.");
+  }
+
   const der = Buffer.from(
     forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(),
     "binary",
   );
-  return certificateFromForgeCert(cert, der);
+  return certificateFromForgeCert(cert, der, certs);
 }
 
-function certificateFromForgeCert(cert: forge.pki.Certificate, der: Buffer): ParsedCertificate {
+function certificateFromForgeCert(
+  cert: forge.pki.Certificate,
+  der: Buffer,
+  certs: forge.pki.Certificate[] = [cert],
+): ParsedCertificate {
   const commonName = getSubjectValue(cert, "CN");
   const organizationalUnit = getSubjectValue(cert, "OU");
   const teamId = detectTeamId(commonName, organizationalUnit);
   const serialHex = normalizeSerialHex(cert.serialNumber);
   const expiration = cert.validity.notAfter;
   const now = new Date();
+  const issuer = findIssuerCertificate(cert, certs);
 
   const info: CertificateInfo = {
     commonName,
@@ -145,9 +155,51 @@ function certificateFromForgeCert(cert: forge.pki.Certificate, der: Buffer): Par
     sha256Fingerprint: fingerprint(der, "sha256"),
     isCurrentlyValid: now >= cert.validity.notBefore && now <= expiration,
     daysUntilExpiration: Math.ceil((expiration.getTime() - now.getTime()) / DAY_MS),
+    revocation: null,
   };
 
-  return { info, der };
+  return {
+    info,
+    der,
+    pem: forge.pki.certificateToPem(cert),
+    issuerDer: issuer ? certificateToDer(issuer) : null,
+    issuerPem: issuer ? forge.pki.certificateToPem(issuer) : null,
+  };
+}
+
+function chooseLeafCertificate(certs: forge.pki.Certificate[]): forge.pki.Certificate | null {
+  return certs.find((cert) => !isCaCertificate(cert)) ?? certs[0] ?? null;
+}
+
+function isCaCertificate(cert: forge.pki.Certificate): boolean {
+  const basicConstraints = cert.extensions.find((extension) => extension.name === "basicConstraints");
+  return Boolean(basicConstraints && "cA" in basicConstraints && basicConstraints.cA === true);
+}
+
+function findIssuerCertificate(
+  cert: forge.pki.Certificate,
+  certs: forge.pki.Certificate[],
+): forge.pki.Certificate | null {
+  return (
+    certs.find(
+      (candidate) =>
+        candidate !== cert &&
+        attributesKey(candidate.subject.attributes) === attributesKey(cert.issuer.attributes),
+    ) ?? null
+  );
+}
+
+function certificateToDer(cert: forge.pki.Certificate): Buffer {
+  return Buffer.from(
+    forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(),
+    "binary",
+  );
+}
+
+function attributesKey(attributes: forge.pki.CertificateField[]): string {
+  return attributes
+    .map((attribute) => `${attribute.shortName ?? attribute.name ?? attribute.type}=${attribute.value}`)
+    .join("|");
 }
 
 function getSubjectValue(cert: forge.pki.Certificate, shortName: string): string | null {

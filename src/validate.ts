@@ -3,6 +3,7 @@ import type {
   CheckStatus,
   ParsedCertificate,
   ParsedProvisioningProfile,
+  RevocationInfo,
   ValidationCheck,
   ValidationResult,
 } from "./types.js";
@@ -51,7 +52,39 @@ function certificateChecks(cert: CertificateInfo): ValidationCheck[] {
     });
   }
 
+  if (cert.revocation) {
+    checks.push(revocationCheck(cert.revocation));
+  }
+
   return checks;
+}
+
+function revocationCheck(revocation: RevocationInfo): ValidationCheck {
+  if (revocation.status === "good") {
+    return {
+      name: "certificate-revocation",
+      status: "pass",
+      message: "Certificate revocation status is good",
+    };
+  }
+
+  if (revocation.status === "revoked") {
+    return {
+      name: "certificate-revocation",
+      status: "fail",
+      message: revocation.revocationTime
+        ? `Certificate is revoked as of ${revocation.revocationTime}`
+        : "Certificate is revoked",
+    };
+  }
+
+  return {
+    name: "certificate-revocation",
+    status: "warning",
+    message: revocation.reason
+      ? `Certificate revocation status is ${revocation.status}: ${revocation.reason}`
+      : `Certificate revocation status is ${revocation.status}`,
+  };
 }
 
 function provisionChecks(profile: ParsedProvisioningProfile["info"]): ValidationCheck[] {

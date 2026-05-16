@@ -13,6 +13,20 @@ export interface ValidationResult {
   checks: ValidationCheck[];
 }
 
+export type RevocationStatus = "good" | "revoked" | "unknown" | "skipped" | "error";
+
+export interface RevocationInfo {
+  method: "OCSP";
+  checked: boolean;
+  status: RevocationStatus;
+  ocspUrl: string | null;
+  checkedAt: string;
+  thisUpdate: string | null;
+  nextUpdate: string | null;
+  revocationTime: string | null;
+  reason: string | null;
+}
+
 export interface CertificateInfo {
   commonName: string | null;
   teamId: string | null;
@@ -24,11 +38,15 @@ export interface CertificateInfo {
   sha256Fingerprint: string;
   isCurrentlyValid: boolean;
   daysUntilExpiration: number;
+  revocation: RevocationInfo | null;
 }
 
 export interface ParsedCertificate {
   info: CertificateInfo;
   der: Buffer;
+  pem: string;
+  issuerDer: Buffer | null;
+  issuerPem: string | null;
 }
 
 export interface ProvisionDeveloperCertificate {

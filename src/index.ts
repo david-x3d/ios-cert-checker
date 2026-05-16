@@ -5,6 +5,7 @@ import { Command, Option } from "commander";
 import chalk from "chalk";
 import { parseP12 } from "./cert.js";
 import { parseMobileProvision } from "./provision.js";
+import { checkOcspRevocation } from "./revocation.js";
 import { validateCertificate, validatePair, validateProvision } from "./validate.js";
 import type {
   CertReport,
@@ -12,6 +13,7 @@ import type {
   CheckReport,
   ProvisioningProfileInfo,
   ProvisionReport,
+  RevocationInfo,
   ValidationCheck,
   ValidationResult,
 } from "./types.js";
@@ -19,6 +21,7 @@ import type {
 interface CertCommandOptions {
   p12?: string;
   password?: string;
+  ocsp?: boolean;
   interactive?: boolean;
   json?: boolean;
 }
@@ -32,6 +35,7 @@ interface CheckCommandOptions {
   p12?: string;
   provision?: string;
   password?: string;
+  ocsp?: boolean;
   interactive?: boolean;
   json?: boolean;
 }
@@ -39,6 +43,7 @@ interface CheckCommandOptions {
 interface CertInput {
   p12: string;
   password: string;
+  ocsp: boolean;
 }
 
 interface ProvisionInput {
@@ -78,6 +83,10 @@ const interactiveOption = new Option(
   "-i, --interactive",
   "prompt for missing input with an interactive terminal flow",
 );
+const ocspOption = new Option(
+  "--ocsp",
+  "check certificate revocation status with OCSP (contacts the certificate OCSP responder)",
+);
 
 program
   .command("wizard")
@@ -93,6 +102,7 @@ program
   .description("Inspect a local .p12 certificate")
   .option("--p12 <path>", "path to .p12 file")
   .option("--password <password>", "PKCS#12 password")
+  .addOption(ocspOption)
   .addOption(interactiveOption)
   .addOption(jsonOption)
   .action((options: CertCommandOptions) =>
@@ -133,6 +143,7 @@ program
   .option("--p12 <path>", "path to .p12 file")
   .option("--provision <path>", "path to .mobileprovision file")
   .option("--password <password>", "PKCS#12 password")
+  .addOption(ocspOption)
   .addOption(interactiveOption)
   .addOption(jsonOption)
   .action((options: CheckCommandOptions) =>
@@ -179,6 +190,12 @@ function buildCertReport(input: CertInput, tui: boolean): CertReport {
     printStep("Reading PKCS#12 certificate");
   }
   const parsed = parseP12(input.p12, input.password);
+  if (input.ocsp) {
+    if (tui) {
+      printStep("Checking certificate revocation with OCSP");
+    }
+    parsed.info.revocation = checkOcspRevocation(parsed);
+  }
   if (tui) {
     printStep("Inspecting certificate metadata");
   }
@@ -203,6 +220,12 @@ function buildCheckReport(input: CheckInput, tui: boolean): CheckReport {
     printStep("Reading PKCS#12 certificate");
   }
   const certificate = parseP12(input.p12, input.password);
+  if (input.ocsp) {
+    if (tui) {
+      printStep("Checking certificate revocation with OCSP");
+    }
+    certificate.info.revocation = checkOcspRevocation(certificate);
+  }
 
   if (tui) {
     printStep("Extracting provisioning profile plist");
@@ -230,6 +253,7 @@ async function resolveCertInput(
     return {
       p12: requireValue(options.p12, "--p12 <path>"),
       password: options.password ?? "",
+      ocsp: options.ocsp === true,
     };
   }
 
@@ -239,7 +263,10 @@ async function resolveCertInput(
     const p12 = options.p12 ?? (await prompt.text("Path to .p12"));
     const password =
       options.password ?? (options.interactive ? await prompt.password("P12 password") : "");
-    return { p12, password };
+    const ocsp =
+      options.ocsp === true ||
+      Boolean(options.interactive && (await prompt.confirm("Check revocation with OCSP?")));
+    return { p12, password, ocsp };
   } finally {
     prompt.close();
   }
@@ -274,6 +301,7 @@ async function resolveCheckInput(
       p12: requireValue(options.p12, "--p12 <path>"),
       provision: requireValue(options.provision, "--provision <path>"),
       password: options.password ?? "",
+      ocsp: options.ocsp === true,
     };
   }
 
@@ -285,7 +313,10 @@ async function resolveCheckInput(
       options.provision ?? (await prompt.text("Path to .mobileprovision"));
     const password =
       options.password ?? (options.interactive ? await prompt.password("P12 password") : "");
-    return { p12, provision, password };
+    const ocsp =
+      options.ocsp === true ||
+      Boolean(options.interactive && (await prompt.confirm("Check revocation with OCSP?")));
+    return { p12, provision, password, ocsp };
   } finally {
     prompt.close();
   }
@@ -312,13 +343,15 @@ async function promptCheckInput(prompt: PromptSession): Promise<CheckInput> {
   const p12 = await prompt.text("Path to .p12");
   const provision = await prompt.text("Path to .mobileprovision");
   const password = await prompt.password("P12 password");
-  return { p12, provision, password };
+  const ocsp = await prompt.confirm("Check revocation with OCSP?");
+  return { p12, provision, password, ocsp };
 }
 
 async function promptCertInput(prompt: PromptSession, includePassword: boolean): Promise<CertInput> {
   const p12 = await prompt.text("Path to .p12");
   const password = includePassword ? await prompt.password("P12 password") : "";
-  return { p12, password };
+  const ocsp = await prompt.confirm("Check revocation with OCSP?");
+  return { p12, password, ocsp };
 }
 
 async function promptProvisionInput(prompt: PromptSession): Promise<ProvisionInput> {
@@ -426,6 +459,31 @@ function printCertificate(cert: CertificateInfo): void {
     ["SHA-1", cert.sha1Fingerprint],
     ["SHA-256", cert.sha256Fingerprint],
     ["Currently Valid", cert.isCurrentlyValid ? "yes" : "no"],
+  ]);
+
+  if (cert.revocation) {
+    printRevocation(cert.revocation);
+  }
+}
+
+function printRevocation(revocation: RevocationInfo): void {
+  const statusColor =
+    revocation.status === "good"
+      ? theme.good
+      : revocation.status === "revoked"
+        ? theme.bad
+        : theme.warn;
+
+  printPanel("Revocation", [
+    ["Method", revocation.method],
+    ["Status", statusColor(revocation.status)],
+    ["Checked", revocation.checked ? "yes" : "no"],
+    ["OCSP URL", revocation.ocspUrl],
+    ["Checked At", formatDateTime(revocation.checkedAt)],
+    ["This Update", formatDateTime(revocation.thisUpdate)],
+    ["Next Update", formatDateTime(revocation.nextUpdate)],
+    ["Revoked At", formatDateTime(revocation.revocationTime)],
+    ["Reason", revocation.reason],
   ]);
 }
 
@@ -731,6 +789,16 @@ class PromptSession {
   async password(label: string): Promise<string> {
     this.rl.pause();
     return askHidden(`${chalk.cyan("?")} ${label}`);
+  }
+
+  async confirm(label: string, defaultValue = false): Promise<boolean> {
+    const suffix = defaultValue ? "Y/n" : "y/N";
+    const answer = await this.rl.question(`${chalk.cyan("?")} ${label} (${suffix}): `);
+    const normalized = answer.trim().toLowerCase();
+    if (!normalized) {
+      return defaultValue;
+    }
+    return normalized === "y" || normalized === "yes";
   }
 
   close(): void {
