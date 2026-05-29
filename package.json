@@ -9,6 +9,7 @@
   "files": [
     "dist",
     "README.md",
+    "LICENSE",
     "package.json"
   ],
   "scripts": {
@@ -27,6 +28,14 @@
     "cli"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/david-x3d/ios-cert-checker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/david-x3d/ios-cert-checker/issues"
+  },
+  "homepage": "https://github.com/david-x3d/ios-cert-checker#readme",
   "dependencies": {
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
