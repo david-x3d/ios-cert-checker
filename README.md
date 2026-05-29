@@ -3,21 +3,24 @@
 > Privacy-first local CLI for inspecting iOS signing certificates and provisioning profiles.
 
 [![npm](https://img.shields.io/npm/v/ios-cert-checker?color=cb3837)](https://www.npmjs.com/package/ios-cert-checker)
+[![CI](https://github.com/david-x3d/ios-cert-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/david-x3d/ios-cert-checker/actions/workflows/ci.yml)
 [![GitHub](https://img.shields.io/badge/GitHub-david--x3d%2Fios--cert--checker-181717?logo=github)](https://github.com/david-x3d/ios-cert-checker)
-![Node](https://img.shields.io/badge/node-%3E%3D18.17-339933)
+![Node](https://img.shields.io/badge/node-%3E%3D18.17-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-ready-3178c6?logo=typescript&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-`ios-cert-checker` inspects local `.p12` certificates and `.mobileprovision` files, then reports signing metadata, entitlement details, expiry status, and certificate/profile compatibility. It is inspection-only: it does not upload files, sign IPAs, distribute apps, or call external services unless you explicitly request OCSP checks.
+`ios-cert-checker` inspects local `.p12` certificates and `.mobileprovision` profiles, then reports signing metadata, entitlements, expiry state and certificate/profile compatibility. It is inspection-only: it does not upload files, sign IPAs, distribute apps or contact external services unless you explicitly request OCSP checks.
 
-## ✨ Features
+## ⚡ Features
 
-- Interactive wizard for guided certificate/profile inspection.
-- `.p12` parsing with password validation, common name, Team ID, serials, dates, and SHA fingerprints.
-- `.mobileprovision` parsing with profile metadata, devices, entitlements, app ID, and embedded developer certificates.
-- Compatibility checks for expiry, Team ID match, profile validity, and embedded certificate fingerprints.
+- Interactive wizard for guided certificate and provisioning-profile inspection.
+- `.p12` parsing with password validation, common name, Team ID, serial number, validity dates and SHA fingerprints.
+- `.mobileprovision` parsing with profile metadata, devices, entitlements, app ID, profile type and embedded developer certificates.
+- Compatibility checks for expiry, Team ID match, profile validity and embedded certificate fingerprints.
 - Optional OCSP revocation checks for Apple signing certificates.
-- JSON output for scripts and CI.
+- JSON output for scripts, CI and automation.
 - Privacy-first local behavior with masked password prompts.
+- Cross-platform CI across Linux, Windows and macOS.
 
 ## 📦 Installation
 
@@ -25,14 +28,20 @@
 npm install -g ios-cert-checker
 ```
 
+Use without installing globally:
+
+```bash
+npx ios-cert-checker --help
+```
+
 Requirements:
 
 | Tool | Purpose |
 | --- | --- |
 | Node.js `>=18.17` | CLI runtime |
-| OpenSSL | CMS extraction, `.p12` fallback parsing, and OCSP checks |
+| OpenSSL | CMS extraction, `.p12` fallback parsing and OCSP checks |
 
-## 🚀 Quick Start
+## 🚀 Usage
 
 Launch the wizard:
 
@@ -70,6 +79,23 @@ ios-cert-checker check \
   --password "password" \
   --json
 ```
+
+Prompt for missing values interactively:
+
+```bash
+ios-cert-checker check --interactive
+ios-cert-checker cert --interactive
+ios-cert-checker provision --interactive
+```
+
+## 🧭 Commands
+
+| Command | Purpose |
+| --- | --- |
+| `ios-cert-checker wizard` | Guided inspection flow |
+| `ios-cert-checker cert` | Inspect a local `.p12` certificate |
+| `ios-cert-checker provision` | Inspect a local `.mobileprovision` profile |
+| `ios-cert-checker check` | Validate a `.p12` against a `.mobileprovision` profile |
 
 ## 🧙 Wizard Mode
 
@@ -122,7 +148,7 @@ Passwords are masked while typing and are never printed.
 
 ## 🧾 JSON Mode
 
-`--json` is intentionally noninteractive. Missing inputs return structured errors.
+`--json` is intentionally automation-friendly. Missing inputs return structured errors instead of launching prompts.
 
 ```json
 {
@@ -149,7 +175,7 @@ Passwords are masked while typing and are never printed.
 
 ## 🛰 OCSP Revocation Checks
 
-OCSP is opt-in because it contacts the certificate’s OCSP responder:
+OCSP is opt-in because it contacts the certificate's OCSP responder:
 
 ```bash
 ios-cert-checker cert --p12 cert.p12 --password "password" --ocsp
@@ -161,11 +187,23 @@ The package includes Apple WWDR intermediate issuer certificates G2 through G6 f
 ## 🔐 Privacy & Security
 
 - Files stay on your machine.
-- No telemetry, analytics, or tracking.
+- No telemetry, analytics or tracking.
 - The CLI does not make network requests unless `--ocsp` is passed.
-- `.p12` passwords are never printed.
+- `.p12` passwords are masked in prompts and are never printed.
 - Private key material is never logged.
 - OpenSSL fallback uses public certificate extraction with `-nokeys`.
+- JSON output is useful for CI, but avoid storing it if certificate metadata is sensitive in your organization.
+
+## Platform Support
+
+| Feature | Linux | Windows | macOS |
+| --- | --- | --- | --- |
+| Wizard | ✅ | ✅ | ✅ |
+| `.p12` inspection | ✅ | ✅ | ✅ |
+| `.mobileprovision` inspection | ✅ | ✅ | ✅ |
+| Compatibility check | ✅ | ✅ | ✅ |
+| JSON output | ✅ | ✅ | ✅ |
+| OCSP checks | ⚠ requires OpenSSL/network | ⚠ requires OpenSSL/network | ⚠ requires OpenSSL/network |
 
 ## ⚠️ Limitations
 
@@ -181,8 +219,9 @@ The package includes Apple WWDR intermediate issuer certificates G2 through G6 f
 git clone https://github.com/david-x3d/ios-cert-checker.git
 cd ios-cert-checker
 npm install
-npm run build
 npm run typecheck
+npm test
+npm run build
 ```
 
 Run from source:
@@ -196,6 +235,17 @@ Package dry run:
 ```bash
 npm pack --dry-run
 ```
+
+## 🗺 Roadmap
+
+- Sample fixture tests for certificate/profile edge cases.
+- Binary plist support.
+- Optional stricter CI mode for JSON validation.
+- More detailed remediation messages for invalid or warning states.
+
+## Contributing
+
+Issues and pull requests are welcome. Keep changes local-first, avoid committing certificates or provisioning profiles, and add tests around parser or validation behavior whenever possible.
 
 ## 📄 License
 
